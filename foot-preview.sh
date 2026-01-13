@@ -7,12 +7,17 @@ FOOT_INI="${FOOT_CONFIG:-$CONFIG_DIR/foot.ini}"
 
 SELF_DIR=$(cd -P -- "$(dirname -- "$0")" && pwd)
 SELF="$SELF_DIR/$(basename -- "$0")"
+SELF_QUOTED=
 
 trim() {
   s=$1
   s=${s#"${s%%[![:space:]]*}"}
   s=${s%"${s##*[![:space:]]}"}
   printf '%s' "$s"
+}
+
+quote_sh() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
 hex_to_rgb() {
@@ -22,6 +27,9 @@ hex_to_rgb() {
     8) hex=${hex%??} ;;
     6) ;;
     *) return 1 ;;
+  esac
+  case $hex in
+    *[!0-9a-fA-F]*) return 1 ;;
   esac
   r_hex=${hex%????}
   g_hex=${hex#??}
@@ -78,6 +86,7 @@ apply_theme() {
       gsub(/^#/, "", c)
       if (length(c) == 8) c = substr(c, 1, 6)
       if (length(c) != 6) return ""
+      if (c ~ /[^0-9A-Fa-f]/) return ""
       return tolower(c)
     }
     function emit(code, color){
@@ -155,7 +164,16 @@ current_theme_from_config() {
 update_config_theme() {
   theme_path=$1
   [ -r "$FOOT_INI" ] || return 1
-  tmp="${FOOT_INI}.tmp.$$"
+  if command -v mktemp >/dev/null 2>&1; then
+    tmp=$(mktemp "${FOOT_INI}.tmp.XXXXXX") || return 1
+  else
+    tmp="${FOOT_INI}.tmp.$$"
+    (
+      umask 077
+      set -C
+      : > "$tmp"
+    ) 2>/dev/null || return 1
+  fi
   theme_include=0
   while IFS= read -r line; do
     trimmed=$(trim "$line")
@@ -245,6 +263,8 @@ if ! command -v fzf >/dev/null 2>&1; then
   exit 1
 fi
 
+SELF_QUOTED=$(quote_sh "$SELF")
+
 original_theme=$(current_theme_from_config || true)
 original_theme_expanded=
 if [ -n "$original_theme" ]; then
@@ -266,7 +286,7 @@ selection=$(
     --height=40% \
     --layout=reverse \
     --prompt='Theme> ' \
-    --bind="focus:execute-silent($SELF --apply {2}),enter:execute-silent($SELF --persist {2})+accept"
+    --bind="focus:execute-silent($SELF_QUOTED --apply {2}),enter:execute-silent($SELF_QUOTED --persist {2})+accept"
 )
 status=$?
 set -e

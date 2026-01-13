@@ -3,6 +3,8 @@
 Preview foot themes in a small fzf picker and persist the selection back to
 `foot.ini`. This project was fully built by codex.
 
+![foot-preview demo](examples/foot-preview.gif)
+
 ## What it does
 
 - Lists themes from `~/.config/foot/themes`.
