@@ -99,7 +99,38 @@ apply_theme() {
   theme_file=$1
   is_safe_value "$theme_file" || return 1
   [ -r "$theme_file" ] || return 1
-  awk -v tty="/dev/tty" '
+  ttys=$(list_target_ttys || true)
+  if [ -z "$ttys" ]; then
+    ttys="/dev/tty"
+  fi
+  old_ifs=$IFS
+  IFS=$NL
+  for tty in $ttys; do
+    [ -n "$tty" ] || continue
+    apply_theme_to_tty "$theme_file" "$tty" || true
+  done
+  IFS=$old_ifs
+}
+
+list_target_ttys() {
+  if [ -n "${TMUX-}" ] && command -v tmux >/dev/null 2>&1; then
+    {
+      if [ -n "${TMUX_PANE-}" ]; then
+        tmux display-message -p -t "$TMUX_PANE" '#{pane_tty}' 2>/dev/null || true
+      fi
+      tmux list-clients -F '#{client_tty}' 2>/dev/null || true
+    } | awk '
+      NF && !seen[$0]++ { print }
+    '
+  fi
+}
+
+apply_theme_to_tty() {
+  theme_file=$1
+  tty=$2
+  is_safe_value "$tty" || return 1
+  [ -w "$tty" ] || return 1
+  awk -v tty="$tty" '
     function trim(s){sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s}
     function normalize(c){
       gsub(/^#/, "", c)

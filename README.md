@@ -69,5 +69,5 @@ sudo dnf install foot fzf
 
 - The script updates the existing `include=` line in `foot.ini` that points
   into the themes directory. If none exists, it inserts one.
-- Preview changes are applied only to the current terminal session until you
-  press Enter.
+- Preview changes are applied only to the current terminal session (or all
+  attached tmux clients) until you press Enter.
