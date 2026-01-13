@@ -3,7 +3,7 @@
 Preview foot themes in a small fzf picker and persist the selection back to
 `foot.ini`. This project was fully built by codex.
 
-![foot-preview demo](examples/foot-preview.gif)
+<img src="examples/foot-preview.gif" alt="foot-preview demo" width="100%">
 
 ## What it does
 
