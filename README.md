@@ -15,9 +15,35 @@ Preview foot themes in a small fzf picker and persist the selection back to
 
 - You are running inside foot (the preview uses OSC color sequences written to
   `/dev/tty`).
-- `fzf` is installed.
+- `fzf` and `foot` are installed.
 - Themes are stored as individual files under `~/.config/foot/themes` and each
   theme has a `[colors]` section.
+
+## Dependencies
+
+- `foot`
+- `fzf`
+
+### Install
+
+Arch:
+
+```sh
+sudo pacman -S foot fzf
+```
+
+Ubuntu:
+
+```sh
+sudo apt update
+sudo apt install foot fzf
+```
+
+Fedora:
+
+```sh
+sudo dnf install foot fzf
+```
 
 ## Usage
 
