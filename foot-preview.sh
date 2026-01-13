@@ -8,6 +8,10 @@ FOOT_INI="${FOOT_CONFIG:-$CONFIG_DIR/foot.ini}"
 SELF_DIR=$(cd -P -- "$(dirname -- "$0")" && pwd)
 SELF="$SELF_DIR/$(basename -- "$0")"
 SELF_QUOTED=
+TAB=$(printf '\t')
+NL=$(printf '\nX')
+NL=${NL%X}
+CR=$(printf '\r')
 
 trim() {
   s=$1
@@ -18,6 +22,13 @@ trim() {
 
 quote_sh() {
   printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+is_safe_value() {
+  case $1 in
+    *"$TAB"*|*"$NL"*|*"$CR"*) return 1 ;;
+  esac
+  return 0
 }
 
 hex_to_rgb() {
@@ -65,7 +76,14 @@ theme_color() {
 
 build_list() {
   find "$THEMES_DIR" -maxdepth 1 -type f | sort | while IFS= read -r path; do
+    [ -f "$path" ] || continue
+    if ! is_safe_value "$path"; then
+      continue
+    fi
     name=$(basename -- "$path")
+    if ! is_safe_value "$name"; then
+      continue
+    fi
     color=$(theme_color "$path" || true)
     if [ -n "$color" ]; then
       if rgb=$(hex_to_rgb "$color" 2>/dev/null); then
@@ -79,6 +97,7 @@ build_list() {
 
 apply_theme() {
   theme_file=$1
+  is_safe_value "$theme_file" || return 1
   [ -r "$theme_file" ] || return 1
   awk -v tty="/dev/tty" '
     function trim(s){sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s}
@@ -163,6 +182,7 @@ current_theme_from_config() {
 
 update_config_theme() {
   theme_path=$1
+  is_safe_value "$theme_path" || return 1
   [ -r "$FOOT_INI" ] || return 1
   if command -v mktemp >/dev/null 2>&1; then
     tmp=$(mktemp "${FOOT_INI}.tmp.XXXXXX") || return 1
@@ -242,12 +262,20 @@ EOF
 
 if [ "${1:-}" = "--apply" ]; then
   [ $# -eq 2 ] || { usage >&2; exit 1; }
+  if ! is_safe_value "$2"; then
+    printf 'Theme path contains unsupported characters.\n' >&2
+    exit 1
+  fi
   apply_theme "$2"
   exit 0
 fi
 
 if [ "${1:-}" = "--persist" ]; then
   [ $# -eq 2 ] || { usage >&2; exit 1; }
+  if ! is_safe_value "$2"; then
+    printf 'Theme path contains unsupported characters.\n' >&2
+    exit 1
+  fi
   config_path=$(config_theme_path "$2")
   update_config_theme "$config_path"
   exit 0
@@ -276,10 +304,9 @@ fi
 
 set +e
 selection=$(
-  tab=$(printf '\t')
   build_list | fzf \
     --ansi \
-    --delimiter="$tab" \
+    --delimiter="$TAB" \
     --with-nth=1 \
     --nth=1 \
     --accept-nth=2 \
@@ -299,6 +326,13 @@ if [ "$status" -ne 0 ]; then
 fi
 
 if [ -n "$selection" ]; then
+  if ! is_safe_value "$selection"; then
+    if [ -n "$original_theme_expanded" ] && [ -r "$original_theme_expanded" ]; then
+      apply_theme "$original_theme_expanded" || true
+    fi
+    printf 'Selection contains unsupported characters.\n' >&2
+    exit 1
+  fi
   config_path=$(config_theme_path "$selection")
   update_config_theme "$config_path"
 fi
