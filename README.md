@@ -1,7 +1,7 @@
 # foot-preview
 
 Preview foot themes in a small fzf picker and persist the selection back to
-`foot.ini`. This project is fully built by codex.
+`foot.ini`. This project was fully built by codex.
 
 ## What it does
 
