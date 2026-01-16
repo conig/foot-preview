@@ -99,6 +99,10 @@ apply_theme() {
   theme_file=$1
   is_safe_value "$theme_file" || return 1
   [ -r "$theme_file" ] || return 1
+  alpha_hex=$(config_alpha_hex || true)
+  case $alpha_hex in
+    ''|ff) alpha_hex= ;;
+  esac
   ttys=$(list_target_ttys || true)
   if [ -z "$ttys" ]; then
     ttys="/dev/tty"
@@ -107,7 +111,7 @@ apply_theme() {
   IFS=$NL
   for tty in $ttys; do
     [ -n "$tty" ] || continue
-    apply_theme_to_tty "$theme_file" "$tty" || true
+    apply_theme_to_tty "$theme_file" "$tty" "$alpha_hex" || true
   done
   IFS=$old_ifs
 }
@@ -128,9 +132,10 @@ list_target_ttys() {
 apply_theme_to_tty() {
   theme_file=$1
   tty=$2
+  alpha_hex=${3-}
   is_safe_value "$tty" || return 1
   [ -w "$tty" ] || return 1
-  awk -v tty="$tty" '
+  awk -v tty="$tty" -v alpha_hex="$alpha_hex" '
     function trim(s){sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s}
     function normalize(c){
       gsub(/^#/, "", c)
@@ -139,10 +144,25 @@ apply_theme_to_tty() {
       if (c ~ /[^0-9A-Fa-f]/) return ""
       return tolower(c)
     }
+    function alpha_ok(){
+      return alpha_hex ~ /^[0-9a-f][0-9a-f]$/
+    }
+    function rgba_spec(color){
+      return "rgba:" substr(color,1,2) "/" substr(color,3,2) "/" substr(color,5,2) "/" alpha_hex
+    }
     function emit(code, color){
       color = normalize(color)
       if (color == "") return
       printf "\033]%s;#%s\033\\", code, color > tty
+    }
+    function emit_background(color){
+      color = normalize(color)
+      if (color == "") return
+      if (alpha_ok()) {
+        printf "\033]11;%s\033\\", rgba_spec(color) > tty
+      } else {
+        printf "\033]11;#%s\033\\", color > tty
+      }
     }
     function emit_palette(idx, color){
       color = normalize(color)
@@ -165,7 +185,7 @@ apply_theme_to_tty() {
       val=trim(substr(line, index(line, "=")+1))
 
       if (key=="foreground") emit(10, val)
-      else if (key=="background") emit(11, val)
+      else if (key=="background") emit_background(val)
       else if (key=="selection-foreground") emit(19, val)
       else if (key=="selection-background") emit(17, val)
       else if (key=="cursor" || key=="cursor-color") {
@@ -198,6 +218,46 @@ expand_path() {
     ~/*) printf '%s/%s' "$HOME" "${path#~/}" ;;
     *) printf '%s' "$path" ;;
   esac
+}
+
+config_colors_value() {
+  key=$1
+  [ -r "$FOOT_INI" ] || return 0
+  awk -v key="$key" '
+    function trim(s){sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s}
+    BEGIN { in_colors=0; val=""; }
+    /^[ \t]*\[/ {
+      if ($0 ~ /^[ \t]*\[colors\]/) in_colors=1; else in_colors=0;
+      next
+    }
+    in_colors==0 { next }
+    /^[ \t]*#/ || /^[ \t]*$/ { next }
+    {
+      line=$0
+      sub(/#.*/, "", line)
+      split(line, parts, "=")
+      if (length(parts) < 2) next
+      k=trim(parts[1])
+      v=trim(substr(line, index(line, "=")+1))
+      if (k==key) val=v
+    }
+    END { if (val!="") print val }
+  ' "$FOOT_INI"
+}
+
+config_alpha_hex() {
+  alpha=$(config_colors_value alpha || true)
+  [ -n "$alpha" ] || return 0
+  awk -v val="$alpha" '
+    BEGIN {
+      gsub(/[ \t]+/, "", val)
+      if (val=="" || val ~ /[^0-9.]/) exit
+      a = val + 0
+      if (a < 0) a = 0
+      if (a > 1) a = 1
+      printf "%02x", int(a * 255 + 0.5)
+    }
+  '
 }
 
 current_theme_from_config() {
