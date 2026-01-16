@@ -25,6 +25,10 @@ restarts.
 - Persist: press Enter
 - Abort: `Esc` restores the original theme
 
+Abort must not only close fzf and leave the config unchanged, but also reload the current theme so the preview ends.
+
+The preview must work across all tmux sessions and their child panes, as well as regular terminals.
+
 ## Requirements
 
 - `fzf`

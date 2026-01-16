@@ -31,6 +31,18 @@ is_safe_value() {
   return 0
 }
 
+is_integer() {
+  val=$1
+  case $val in
+    ''|-) return 1 ;;
+    -*) val=${val#-} ;;
+  esac
+  case $val in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  return 0
+}
+
 hex_to_rgb() {
   hex=$1
   hex=${hex#\#}
@@ -142,26 +154,37 @@ apply_theme() {
   if [ -z "$ttys" ]; then
     ttys="/dev/tty"
   fi
+  applied=0
   old_ifs=$IFS
   IFS=$NL
   for tty in $ttys; do
     [ -n "$tty" ] || continue
-    apply_theme_to_tty "$theme_file" "$tty" "$alpha_hex" || true
+    if apply_theme_to_tty "$theme_file" "$tty" "$alpha_hex"; then
+      applied=1
+    fi
   done
   IFS=$old_ifs
+  [ "$applied" -eq 1 ] || return 1
 }
 
 list_target_ttys() {
-  if [ -n "${TMUX-}" ] && command -v tmux >/dev/null 2>&1; then
-    {
+  {
+    if command -v tty >/dev/null 2>&1; then
+      tty_path=$(tty 2>/dev/null || true)
+      case $tty_path in
+        /dev/*) printf '%s\n' "$tty_path" ;;
+      esac
+    fi
+    printf '%s\n' "/dev/tty"
+    if [ -n "${TMUX-}" ] && command -v tmux >/dev/null 2>&1; then
       if [ -n "${TMUX_PANE-}" ]; then
         tmux display-message -p -t "$TMUX_PANE" '#{pane_tty}' 2>/dev/null || true
       fi
       tmux list-clients -F '#{client_tty}' 2>/dev/null || true
-    } | awk '
-      NF && !seen[$0]++ { print }
-    '
-  fi
+    fi
+  } | awk '
+    NF && !seen[$0]++ { print }
+  '
 }
 
 apply_theme_to_tty() {
@@ -189,6 +212,7 @@ apply_theme_to_tty() {
       color = normalize(color)
       if (color == "") return
       printf "\033]%s;#%s\033\\", code, color > tty
+      emitted=1
     }
     function emit_background(color){
       color = normalize(color)
@@ -198,13 +222,15 @@ apply_theme_to_tty() {
       } else {
         printf "\033]11;#%s\033\\", color > tty
       }
+      emitted=1
     }
     function emit_palette(idx, color){
       color = normalize(color)
       if (color == "") return
       printf "\033]4;%d;#%s\033\\", idx, color > tty
+      emitted=1
     }
-    BEGIN { in_colors=0; }
+    BEGIN { in_colors=0; emitted=0; }
     /^[ \t]*\[/ {
       if ($0 ~ /^[ \t]*\[colors\]/) in_colors=1; else in_colors=0;
       next
@@ -235,7 +261,10 @@ apply_theme_to_tty() {
         emit_palette(idx, val)
       }
     }
-    END { fflush(tty) }
+    END {
+      if (!emitted) exit 1
+      close(tty)
+    }
   ' "$theme_file"
 }
 
@@ -251,7 +280,8 @@ expand_path() {
   path=$1
   case $path in
     ~/*) printf '%s/%s' "$HOME" "${path#~/}" ;;
-    *) printf '%s' "$path" ;;
+    /*) printf '%s' "$path" ;;
+    *) printf '%s/%s' "$(dirname -- "$FOOT_INI")" "$path" ;;
   esac
 }
 
@@ -295,15 +325,143 @@ config_alpha_hex() {
   '
 }
 
+config_alpha_percent() {
+  alpha=$(config_colors_value alpha || true)
+  awk -v val="$alpha" '
+    BEGIN {
+      gsub(/[ \t]+/, "", val)
+      if (val=="" || val ~ /[^0-9.]/) {
+        print 100
+        exit
+      }
+      a = val + 0
+      if (a < 0) a = 0
+      if (a > 1) a = 1
+      printf "%d", int(a * 100 + 0.5)
+    }
+  '
+}
+
+alpha_from_percent() {
+  pct=$1
+  awk -v val="$pct" '
+    BEGIN {
+      if (val < 0) val = 0
+      if (val > 100) val = 100
+      printf "%.3f", val / 100
+    }
+  '
+}
+
 current_theme_from_config() {
   [ -r "$FOOT_INI" ] || return 0
-  awk '
+  themes_dir=$(expand_path "$THEMES_DIR")
+  conf_dir=$(dirname -- "$FOOT_INI")
+  awk -v themes_dir="$themes_dir" -v home="$HOME" -v conf_dir="$conf_dir" '
     function trim(s){sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s}
-    /^[ \t]*include[ \t]*=/ {
-      val=trim(substr($0, index($0, "=")+1))
-      print val
+    function expand(p){
+      if (p ~ /^~\//) return home substr(p, 3)
+      if (p ~ /^\//) return p
+      return conf_dir "/" p
     }
-  ' "$FOOT_INI" | tail -n 1
+    BEGIN { last=""; last_theme=""; }
+    {
+      line=$0
+      sub(/[;#].*$/, "", line)
+      line=trim(line)
+      if (line == "") next
+      if (line ~ /^include[ \t]*=/) {
+        val=trim(substr(line, index(line, "=")+1))
+        if (val == "") next
+        last=val
+        path=expand(val)
+        if (index(path, themes_dir "/") == 1) last_theme=val
+      }
+    }
+    END {
+      if (last_theme != "") print last_theme
+      else if (last != "") print last
+    }
+  ' "$FOOT_INI"
+}
+
+apply_preview() {
+  theme_file=${1-}
+  if [ -n "$theme_file" ]; then
+    apply_theme "$theme_file" || return 1
+    return 0
+  fi
+  theme=$(current_theme_from_config || true)
+  if [ -n "$theme" ]; then
+    theme=$(expand_path "$theme")
+    if [ -r "$theme" ] && apply_theme "$theme"; then
+      return 0
+    fi
+  fi
+  if [ -r "$FOOT_INI" ]; then
+    apply_theme "$FOOT_INI" || true
+  fi
+}
+
+update_config_alpha() {
+  alpha_value=$1
+  [ -r "$FOOT_INI" ] || return 1
+  if command -v mktemp >/dev/null 2>&1; then
+    tmp=$(mktemp "${FOOT_INI}.tmp.XXXXXX") || return 1
+  else
+    tmp="${FOOT_INI}.tmp.$$"
+    (
+      umask 077
+      set -C
+      : > "$tmp"
+    ) 2>/dev/null || return 1
+  fi
+  if ! awk -v alpha="$alpha_value" '
+    BEGIN { in_colors=0; saw_colors=0; wrote=0; }
+    {
+      line=$0
+      if (line ~ /^[ \t]*\[[^]]+\][ \t]*$/) {
+        if (in_colors && !wrote) {
+          print "alpha=" alpha
+          wrote=1
+        }
+        if (line ~ /^[ \t]*\[colors\][ \t]*$/) {
+          in_colors=1
+          saw_colors=1
+        } else {
+          in_colors=0
+        }
+        print line
+        next
+      }
+      if (in_colors) {
+        test=line
+        sub(/[;#].*$/, "", test)
+        if (test ~ /^[ \t]*alpha[ \t]*=/) {
+          match(line, /^[ \t]*/)
+          lead=substr(line, RSTART, RLENGTH)
+          comment=""
+          if (match(line, /[;#]/)) comment=substr(line, RSTART)
+          print lead "alpha=" alpha comment
+          wrote=1
+          next
+        }
+      }
+      print line
+    }
+    END {
+      if (!saw_colors) {
+        print ""
+        print "[colors]"
+        print "alpha=" alpha
+      } else if (in_colors && !wrote) {
+        print "alpha=" alpha
+      }
+    }
+  ' "$FOOT_INI" > "$tmp"; then
+    return 1
+  fi
+  mv -- "$tmp" "$FOOT_INI"
 }
 
 update_config_theme() {
@@ -383,6 +541,8 @@ Usage:
   foot-preview
   foot-preview --apply THEME_FILE
   foot-preview --persist THEME_FILE
+  foot-preview --add-alpha PERCENT
+  foot-preview --set-alpha PERCENT
 EOF
 }
 
@@ -392,7 +552,7 @@ if [ "${1:-}" = "--apply" ]; then
     printf 'Theme path contains unsupported characters.\n' >&2
     exit 1
   fi
-  apply_theme "$2"
+  apply_preview "$2"
   exit 0
 fi
 
@@ -404,6 +564,43 @@ if [ "${1:-}" = "--persist" ]; then
   fi
   config_path=$(config_theme_path "$2")
   update_config_theme "$config_path"
+  exit 0
+fi
+
+case ${1:-} in
+  --add|--add-alpha) mode=add ;;
+  --set|--set-alpha) mode=set ;;
+  *) mode= ;;
+esac
+
+if [ -n "$mode" ]; then
+  [ $# -eq 2 ] || { usage >&2; exit 1; }
+  if ! is_integer "$2"; then
+    printf 'Alpha must be an integer.\n' >&2
+    exit 1
+  fi
+  if [ "$mode" = "set" ]; then
+    if [ "$2" -lt 0 ] || [ "$2" -gt 100 ]; then
+      printf 'Alpha must be between 0 and 100.\n' >&2
+      exit 1
+    fi
+    alpha_percent=$2
+  else
+    current=$(config_alpha_percent || true)
+    [ -n "$current" ] || current=100
+    alpha_percent=$((current + $2))
+    if [ "$alpha_percent" -lt 0 ]; then
+      alpha_percent=0
+    elif [ "$alpha_percent" -gt 100 ]; then
+      alpha_percent=100
+    fi
+  fi
+  alpha_value=$(alpha_from_percent "$alpha_percent")
+  if ! update_config_alpha "$alpha_value"; then
+    printf 'Failed to update foot config: %s\n' "$FOOT_INI" >&2
+    exit 1
+  fi
+  apply_preview
   exit 0
 fi
 
@@ -446,7 +643,7 @@ set -e
 
 if [ "$status" -ne 0 ]; then
   if [ -n "$original_theme_expanded" ] && [ -r "$original_theme_expanded" ]; then
-    apply_theme "$original_theme_expanded" || true
+    apply_preview "$original_theme_expanded" || true
   fi
   exit "$status"
 fi
@@ -454,7 +651,7 @@ fi
 if [ -n "$selection" ]; then
   if ! is_safe_value "$selection"; then
     if [ -n "$original_theme_expanded" ] && [ -r "$original_theme_expanded" ]; then
-      apply_theme "$original_theme_expanded" || true
+      apply_preview "$original_theme_expanded" || true
     fi
     printf 'Selection contains unsupported characters.\n' >&2
     exit 1
