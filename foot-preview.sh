@@ -74,6 +74,30 @@ theme_color() {
   ' "$1"
 }
 
+theme_background() {
+  awk '
+    function trim(s){sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s}
+    BEGIN { in_colors=0; fallback=""; }
+    /^[ \t]*\[/ {
+      if ($0 ~ /^[ \t]*\[colors\]/) in_colors=1; else in_colors=0;
+      next
+    }
+    in_colors==0 { next }
+    /^[ \t]*#/ || /^[ \t]*$/ { next }
+    {
+      line=$0
+      sub(/#.*/, "", line)
+      split(line, parts, "=")
+      if (length(parts) < 2) next
+      key=trim(parts[1])
+      val=trim(substr(line, index(line, "=")+1))
+      if (key=="background") { print val; exit }
+      if (key=="regular0" && fallback=="") fallback=val
+    }
+    END { if (fallback!="") print fallback }
+  ' "$1"
+}
+
 build_list() {
   find "$THEMES_DIR" -maxdepth 1 -type f | sort | while IFS= read -r path; do
     [ -f "$path" ] || continue
@@ -84,14 +108,25 @@ build_list() {
     if ! is_safe_value "$name"; then
       continue
     fi
-    color=$(theme_color "$path" || true)
-    if [ -n "$color" ]; then
-      if rgb=$(hex_to_rgb "$color" 2>/dev/null); then
-        printf '\033[38;2;%sm%s\033[0m\t%s\n' "$rgb" "$name" "$path"
-        continue
-      fi
+    fg_color=$(theme_color "$path" || true)
+    bg_color=$(theme_background "$path" || true)
+    fg_rgb=
+    bg_rgb=
+    if [ -n "$fg_color" ]; then
+      fg_rgb=$(hex_to_rgb "$fg_color" 2>/dev/null || true)
     fi
-    printf '%s\t%s\n' "$name" "$path"
+    if [ -n "$bg_color" ]; then
+      bg_rgb=$(hex_to_rgb "$bg_color" 2>/dev/null || true)
+    fi
+    if [ -n "$fg_rgb" ] && [ -n "$bg_rgb" ]; then
+      printf '\033[38;2;%s;48;2;%sm%s\033[0m\t%s\n' "$fg_rgb" "$bg_rgb" "$name" "$path"
+    elif [ -n "$fg_rgb" ]; then
+      printf '\033[38;2;%sm%s\033[0m\t%s\n' "$fg_rgb" "$name" "$path"
+    elif [ -n "$bg_rgb" ]; then
+      printf '\033[48;2;%sm%s\033[0m\t%s\n' "$bg_rgb" "$name" "$path"
+    else
+      printf '%s\t%s\n' "$name" "$path"
+    fi
   done
 }
 
