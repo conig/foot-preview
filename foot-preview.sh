@@ -73,11 +73,12 @@ theme_color() {
     /^[ \t]*#/ || /^[ \t]*$/ { next }
     {
       line=$0
-      sub(/#.*/, "", line)
-      split(line, parts, "=")
-      if (length(parts) < 2) next
+      n = split(line, parts, "=")
+      if (n < 2) next
       key=trim(parts[1])
       val=trim(substr(line, index(line, "=")+1))
+      sub(/[ \t][;#].*$/, "", val)
+      val=trim(val)
       if (key=="foreground") { print val; exit }
       if (key=="regular4" && fallback=="") fallback=val
       if (key=="regular7" && fallback=="") fallback=val
@@ -98,11 +99,12 @@ theme_background() {
     /^[ \t]*#/ || /^[ \t]*$/ { next }
     {
       line=$0
-      sub(/#.*/, "", line)
-      split(line, parts, "=")
-      if (length(parts) < 2) next
+      n = split(line, parts, "=")
+      if (n < 2) next
       key=trim(parts[1])
       val=trim(substr(line, index(line, "=")+1))
+      sub(/[ \t][;#].*$/, "", val)
+      val=trim(val)
       if (key=="background") { print val; exit }
       if (key=="regular0" && fallback=="") fallback=val
     }
@@ -168,6 +170,12 @@ apply_theme() {
 }
 
 list_target_ttys() {
+  if [ -n "${FOOT_PREVIEW_TTYS-}" ]; then
+    printf '%s\n' "$FOOT_PREVIEW_TTYS" | tr ':' '\n' | awk '
+      NF && !seen[$0]++ { print }
+    '
+    return 0
+  fi
   {
     if command -v tty >/dev/null 2>&1; then
       tty_path=$(tty 2>/dev/null || true)
@@ -182,8 +190,11 @@ list_target_ttys() {
       fi
       tmux list-clients -F '#{client_tty}' 2>/dev/null || true
     fi
-  } | awk '
-    NF && !seen[$0]++ { print }
+  } | awk -v skip="${FOOT_PREVIEW_SKIP_TTY-}" '
+    NF && !seen[$0]++ {
+      if (skip && $0=="/dev/tty") next
+      print
+    }
   '
 }
 
@@ -223,6 +234,7 @@ apply_theme_to_tty() {
         printf "\033]11;#%s\033\\", color > tty
       }
       emitted=1
+      bg_emitted=1
     }
     function emit_palette(idx, color){
       color = normalize(color)
@@ -230,7 +242,7 @@ apply_theme_to_tty() {
       printf "\033]4;%d;#%s\033\\", idx, color > tty
       emitted=1
     }
-    BEGIN { in_colors=0; emitted=0; }
+    BEGIN { in_colors=0; emitted=0; bg_emitted=0; bg_fallback=""; }
     /^[ \t]*\[/ {
       if ($0 ~ /^[ \t]*\[colors\]/) in_colors=1; else in_colors=0;
       next
@@ -239,11 +251,12 @@ apply_theme_to_tty() {
     /^[ \t]*#/ || /^[ \t]*$/ { next }
     {
       line=$0
-      sub(/#.*/, "", line)
-      split(line, parts, "=")
-      if (length(parts) < 2) next
+      n = split(line, parts, "=")
+      if (n < 2) next
       key=trim(parts[1])
       val=trim(substr(line, index(line, "=")+1))
+      sub(/[ \t][;#].*$/, "", val)
+      val=trim(val)
 
       if (key=="foreground") emit(10, val)
       else if (key=="background") emit_background(val)
@@ -256,12 +269,14 @@ apply_theme_to_tty() {
       } else if (key ~ /^regular[0-7]$/) {
         idx = substr(key, 8)
         emit_palette(idx, val)
+        if (key=="regular0" && bg_fallback=="") bg_fallback=val
       } else if (key ~ /^bright[0-7]$/) {
         idx = 8 + substr(key, 7)
         emit_palette(idx, val)
       }
     }
     END {
+      if (!bg_emitted && bg_fallback != "") emit_background(bg_fallback)
       if (!emitted) exit 1
       close(tty)
     }
@@ -299,11 +314,12 @@ config_colors_value() {
     /^[ \t]*#/ || /^[ \t]*$/ { next }
     {
       line=$0
-      sub(/#.*/, "", line)
-      split(line, parts, "=")
-      if (length(parts) < 2) next
+      n = split(line, parts, "=")
+      if (n < 2) next
       k=trim(parts[1])
       v=trim(substr(line, index(line, "=")+1))
+      sub(/[ \t][;#].*$/, "", v)
+      v=trim(v)
       if (k==key) val=v
     }
     END { if (val!="") print val }
@@ -619,10 +635,7 @@ SELF_QUOTED=$(quote_sh "$SELF")
 original_theme=$(current_theme_from_config || true)
 original_theme_expanded=
 if [ -n "$original_theme" ]; then
-  case $original_theme in
-    ~/*) original_theme_expanded="$HOME/${original_theme#~/}" ;;
-    *) original_theme_expanded="$original_theme" ;;
-  esac
+  original_theme_expanded=$(expand_path "$original_theme")
 fi
 
 set +e

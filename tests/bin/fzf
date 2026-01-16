@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+
+if [ -n "${FZF_ARGS-}" ]; then
+  : > "$FZF_ARGS"
+  for arg in "$@"; do
+    printf '%s\n' "$arg" >> "$FZF_ARGS"
+  done
+fi
+
+if [ -n "${FZF_CAPTURE-}" ]; then
+  cat > "$FZF_CAPTURE"
+else
+  cat >/dev/null
+fi
+
+if [ -n "${FZF_SELECTION-}" ]; then
+  printf '%s' "$FZF_SELECTION"
+fi
+
+if [ -n "${FZF_EXIT_STATUS-}" ]; then
+  exit "$FZF_EXIT_STATUS"
+fi
+
+exit 0

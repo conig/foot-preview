@@ -9,14 +9,15 @@ Preview foot themes in a small fzf picker and persist the selection back to
 
 - Lists themes from `~/.config/foot/themes`.
 - Colors each theme name using that theme's own foreground color.
-- Live-previews a theme as you move the cursor.
+- Live-previews a theme as you move the cursor (including across tmux clients).
 - Persists the selection by updating the `include=` line in
   `~/.config/foot/foot.ini`.
+- Restores the original theme on abort without changing the config.
 
 ## Assumptions
 
 - You are running inside foot (the preview uses OSC color sequences written to
-  `/dev/tty`).
+  `/dev/tty`) or tmux clients that are running in foot.
 - `fzf` and `foot` are installed.
 - Themes are stored as individual files under `~/.config/foot/themes` and each
   theme has a `[colors]` section.
@@ -56,7 +57,7 @@ sudo dnf install foot fzf
 - Move the cursor to preview a theme.
 - Press Enter to persist the selection.
 - Press Esc to exit without changes (the original theme is restored in the
-  current terminal).
+  current terminal and tmux clients).
 
 ## Configuration
 
@@ -64,6 +65,29 @@ sudo dnf install foot fzf
   `~/.config/foot/themes`).
 - `FOOT_CONFIG`: override the foot config path (default:
   `~/.config/foot/foot.ini`).
+- `FOOT_PREVIEW_TTYS`: colon-delimited list of tty paths to target for preview
+  output (overrides tmux/tty detection).
+- `FOOT_PREVIEW_SKIP_TTY`: set to `1` to skip writing to `/dev/tty` during
+  preview (useful for tests).
+
+### Alpha helpers
+
+```sh
+./foot-preview --set-alpha 75
+./foot-preview --add-alpha -10
+```
+
+Note: alpha changes are written to `foot.ini`, but foot itself must be restarted
+for the new alpha to take effect.
+
+## Tests
+
+```sh
+./tests/run.sh
+```
+
+Tests route OSC output to temporary files by setting `FOOT_PREVIEW_TTYS` or
+`FOOT_PREVIEW_SKIP_TTY` to avoid touching the active terminal.
 
 ## Notes
 

@@ -1,0 +1,27 @@
+#!/bin/sh
+set -eu
+
+cmd=${1-}
+shift || true
+
+case "$cmd" in
+  display-message)
+    if [ -n "${TMUX_PANE_TTY-}" ]; then
+      printf '%s\n' "$TMUX_PANE_TTY"
+    fi
+    ;;
+  list-clients)
+    if [ -n "${TMUX_CLIENT_TTYS-}" ]; then
+      old_ifs=$IFS
+      IFS=:
+      for tty in $TMUX_CLIENT_TTYS; do
+        [ -n "$tty" ] || continue
+        printf '%s\n' "$tty"
+      done
+      IFS=$old_ifs
+    fi
+    ;;
+  *)
+    exit 0
+    ;;
+esac
