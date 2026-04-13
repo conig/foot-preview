@@ -62,11 +62,16 @@ hex_to_rgb() {
 }
 
 theme_color() {
+  section=$(preferred_colors_section "$1")
+  [ -n "$section" ] || return 0
   awk '
     function trim(s){sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s}
-    BEGIN { in_colors=0; fallback=""; }
+    BEGIN { in_colors=0; regular4=""; regular7=""; }
     /^[ \t]*\[/ {
-      if ($0 ~ /^[ \t]*\[colors\]/) in_colors=1; else in_colors=0;
+      section_name=$0
+      sub(/^[ \t]*\[/, "", section_name)
+      sub(/\][ \t]*$/, "", section_name)
+      if (section_name==section) in_colors=1; else in_colors=0;
       next
     }
     in_colors==0 { next }
@@ -80,19 +85,27 @@ theme_color() {
       sub(/[ \t][;#].*$/, "", val)
       val=trim(val)
       if (key=="foreground") { print val; exit }
-      if (key=="regular4" && fallback=="") fallback=val
-      if (key=="regular7" && fallback=="") fallback=val
+      if (key=="regular4" && regular4=="") regular4=val
+      if (key=="regular7" && regular7=="") regular7=val
     }
-    END { if (fallback!="") print fallback }
-  ' "$1"
+    END {
+      if (regular4!="") print regular4
+      else if (regular7!="") print regular7
+    }
+  ' section="$section" "$1"
 }
 
 theme_background() {
+  section=$(preferred_colors_section "$1")
+  [ -n "$section" ] || return 0
   awk '
     function trim(s){sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s}
     BEGIN { in_colors=0; fallback=""; }
     /^[ \t]*\[/ {
-      if ($0 ~ /^[ \t]*\[colors\]/) in_colors=1; else in_colors=0;
+      section_name=$0
+      sub(/^[ \t]*\[/, "", section_name)
+      sub(/\][ \t]*$/, "", section_name)
+      if (section_name==section) in_colors=1; else in_colors=0;
       next
     }
     in_colors==0 { next }
@@ -109,6 +122,22 @@ theme_background() {
       if (key=="regular0" && fallback=="") fallback=val
     }
     END { if (fallback!="") print fallback }
+  ' section="$section" "$1"
+}
+
+preferred_colors_section() {
+  awk '
+    BEGIN { saw_colors=0; saw_dark=0; saw_light=0; }
+    /^[ \t]*\[/ {
+      if ($0 ~ /^[ \t]*\[colors\][ \t]*$/) saw_colors=1
+      else if ($0 ~ /^[ \t]*\[colors-dark\][ \t]*$/) saw_dark=1
+      else if ($0 ~ /^[ \t]*\[colors-light\][ \t]*$/) saw_light=1
+    }
+    END {
+      if (saw_colors) print "colors"
+      else if (saw_dark) print "colors-dark"
+      else if (saw_light) print "colors-light"
+    }
   ' "$1"
 }
 
@@ -202,9 +231,11 @@ apply_theme_to_tty() {
   theme_file=$1
   tty=$2
   alpha_hex=${3-}
+  section=$(preferred_colors_section "$theme_file")
   is_safe_value "$tty" || return 1
+  [ -n "$section" ] || return 1
   [ -w "$tty" ] || return 1
-  awk -v tty="$tty" -v alpha_hex="$alpha_hex" '
+  awk -v tty="$tty" -v alpha_hex="$alpha_hex" -v section="$section" '
     function trim(s){sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s}
     function normalize(c){
       gsub(/^#/, "", c)
@@ -244,7 +275,10 @@ apply_theme_to_tty() {
     }
     BEGIN { in_colors=0; emitted=0; bg_emitted=0; bg_fallback=""; }
     /^[ \t]*\[/ {
-      if ($0 ~ /^[ \t]*\[colors\]/) in_colors=1; else in_colors=0;
+      section_name=$0
+      sub(/^[ \t]*\[/, "", section_name)
+      sub(/\][ \t]*$/, "", section_name)
+      if (section_name==section) in_colors=1; else in_colors=0;
       next
     }
     in_colors==0 { next }
@@ -642,6 +676,7 @@ set +e
 selection=$(
   build_list | fzf \
     --ansi \
+    --color=hl:-1:underline,hl+:-1:underline \
     --delimiter="$TAB" \
     --with-nth=1 \
     --nth=1 \
